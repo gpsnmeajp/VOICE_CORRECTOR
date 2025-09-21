@@ -1,6 +1,11 @@
 # VOICE_CORRECTOR
 
 音声入力された文字列を文法的に正しい文章に変換するGUIアプリケーションです。
+肩を骨折して音声入力に頼らなければならなくなったので作ったアプリケーションです。
+
+Win+Hで起動するWindows 11標準の音声認識機能と組み合わせて使用することを前提としています。
+
+![alt text](image.png)
 
 **GitHub Repository**: https://github.com/gpsnmeajp/VOICE_CORRECTOR
 
