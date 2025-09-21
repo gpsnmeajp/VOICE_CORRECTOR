@@ -29,13 +29,6 @@ class VoiceCorrector:
         # DPIスケーリングファクターを取得
         self.scale_factor = self.get_scale_factor()
         
-        # ウィンドウサイズをスケーリングに合わせて調整
-        base_width = 800
-        base_height = 600
-        scaled_width = int(base_width * self.scale_factor)
-        scaled_height = int(base_height * self.scale_factor)
-        self.root.geometry(f"{scaled_width}x{scaled_height}")
-        
         # フォントサイズの調整
         self.setup_scaled_fonts()
         
@@ -47,7 +40,13 @@ class VoiceCorrector:
         self.settings = {
             "conversion_policy": "",
             "reference_text": "",
-            "selected_reference_file": ""
+            "selected_reference_file": "",
+            "window_width": 800,
+            "window_height": 600,
+            "window_x": None,
+            "window_y": None,
+            "show_policy_section": True,
+            "show_reference_section": True
         }
         
         # 参考用ファイルリスト
@@ -58,6 +57,9 @@ class VoiceCorrector:
         
         # 設定の読み込み
         self.load_settings()
+        
+        # ウィンドウサイズとポジションの復元
+        self.restore_window_geometry()
         
         # 参考用ファイルリストの更新
         self.update_reference_files()
@@ -111,13 +113,58 @@ class VoiceCorrector:
     def scale_size(self, size: int) -> int:
         """サイズをスケーリングファクターに基づいて調整"""
         return int(size * self.scale_factor)
+    
+    def restore_window_geometry(self):
+        """保存されたウィンドウサイズとポジションを復元"""
+        try:
+            # 保存された設定から値を取得
+            saved_width = self.settings.get("window_width", 800)
+            saved_height = self.settings.get("window_height", 600)
+            saved_x = self.settings.get("window_x")
+            saved_y = self.settings.get("window_y")
+            
+            # DPIスケーリングを適用
+            scaled_width = int(saved_width * self.scale_factor)
+            scaled_height = int(saved_height * self.scale_factor)
+            
+            # ウィンドウサイズを設定
+            if saved_x is not None and saved_y is not None:
+                # ポジションも保存されている場合
+                scaled_x = int(saved_x * self.scale_factor)
+                scaled_y = int(saved_y * self.scale_factor)
+                
+                # 画面外に出ないように調整
+                screen_width = self.root.winfo_screenwidth()
+                screen_height = self.root.winfo_screenheight()
+                
+                # 最小限の表示領域を確保
+                if scaled_x < 0:
+                    scaled_x = 0
+                if scaled_y < 0:
+                    scaled_y = 0
+                if scaled_x + scaled_width > screen_width:
+                    scaled_x = screen_width - scaled_width
+                if scaled_y + scaled_height > screen_height:
+                    scaled_y = screen_height - scaled_height
+                
+                self.root.geometry(f"{scaled_width}x{scaled_height}+{scaled_x}+{scaled_y}")
+            else:
+                # ポジションが保存されていない場合はサイズのみ設定
+                self.root.geometry(f"{scaled_width}x{scaled_height}")
+                
+        except Exception as e:
+            # エラーが発生した場合はデフォルトサイズ
+            print(f"ウィンドウサイズの復元に失敗: {e}")
+            default_width = int(800 * self.scale_factor)
+            default_height = int(600 * self.scale_factor)
+            self.root.geometry(f"{default_width}x{default_height}")
         
     def setup_gui(self):
         """GUI要素のセットアップ"""
         # メインフレーム
         padding = self.scale_size(10)
         main_frame = ttk.Frame(self.root, padding=str(padding))
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        main_frame.grid(row=0, column=0, sticky="nsew")
         
         # グリッドの重みを設定
         self.root.columnconfigure(0, weight=1)
@@ -129,7 +176,7 @@ class VoiceCorrector:
         input_height = self.scale_size(6)
         input_width = self.scale_size(70)
         self.input_text = scrolledtext.ScrolledText(main_frame, height=input_height, width=input_width)
-        self.input_text.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, self.scale_size(10)))
+        self.input_text.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(0, self.scale_size(10)))
         
         # 入力ボックスのキーイベントをバインド（改行3連続での自動変換）
         self.input_text.bind('<KeyRelease>', self.on_input_key_release)
@@ -137,20 +184,53 @@ class VoiceCorrector:
         # 右クリックメニューを明示的に有効化
         self.setup_text_context_menu(self.input_text)
         
-        # 変換の方針ボックス
-        ttk.Label(main_frame, text="変換の方針:").grid(row=2, column=0, sticky=tk.W, pady=(0, self.scale_size(5)))
+        # 変換の方針セクション（折りたたみ可能）
+        policy_frame = ttk.Frame(main_frame)
+        policy_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, self.scale_size(10)))
+        policy_frame.columnconfigure(0, weight=1)
+        
+        # 方針セクションのヘッダー（クリックで展開/折りたたみ）
+        self.policy_header_frame = ttk.Frame(policy_frame)
+        self.policy_header_frame.grid(row=0, column=0, sticky="ew")
+        self.policy_header_frame.columnconfigure(0, weight=1)
+        
+        self.policy_toggle_btn = ttk.Button(self.policy_header_frame, text="▼ 変換の方針", 
+                                          command=self.toggle_policy_section)
+        self.policy_toggle_btn.grid(row=0, column=0, sticky=tk.W)
+        
+        # 方針セクションのコンテンツ
+        self.policy_content_frame = ttk.Frame(policy_frame)
+        self.policy_content_frame.grid(row=1, column=0, sticky="ew", pady=(self.scale_size(5), 0))
+        self.policy_content_frame.columnconfigure(0, weight=1)
+        
         policy_height = self.scale_size(3)
-        self.policy_text = scrolledtext.ScrolledText(main_frame, height=policy_height, width=input_width)
-        self.policy_text.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, self.scale_size(10)))
+        self.policy_text = scrolledtext.ScrolledText(self.policy_content_frame, height=policy_height, width=input_width)
+        self.policy_text.grid(row=0, column=0, sticky="ew")
         
         # 右クリックメニューを設定
         self.setup_text_context_menu(self.policy_text)
         
-        # 参考用ボックスセレクターと参考用ボックス
-        ttk.Label(main_frame, text="参考用ファイル:").grid(row=4, column=0, sticky=tk.W, pady=(0, self.scale_size(5)))
+        # 参考用セクション（折りたたみ可能）
+        reference_main_frame = ttk.Frame(main_frame)
+        reference_main_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(0, self.scale_size(10)))
+        reference_main_frame.columnconfigure(0, weight=1)
         
-        reference_frame = ttk.Frame(main_frame)
-        reference_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, self.scale_size(10)))
+        # 参考用セクションのヘッダー
+        self.reference_header_frame = ttk.Frame(reference_main_frame)
+        self.reference_header_frame.grid(row=0, column=0, sticky="ew")
+        self.reference_header_frame.columnconfigure(0, weight=1)
+        
+        self.reference_toggle_btn = ttk.Button(self.reference_header_frame, text="▼ 参考用ファイル", 
+                                             command=self.toggle_reference_section)
+        self.reference_toggle_btn.grid(row=0, column=0, sticky=tk.W)
+        
+        # 参考用セクションのコンテンツ
+        self.reference_content_frame = ttk.Frame(reference_main_frame)
+        self.reference_content_frame.grid(row=1, column=0, sticky="ew", pady=(self.scale_size(5), 0))
+        self.reference_content_frame.columnconfigure(0, weight=1)
+        
+        reference_frame = ttk.Frame(self.reference_content_frame)
+        reference_frame.grid(row=0, column=0, sticky="ew", pady=(0, self.scale_size(5)))
         reference_frame.columnconfigure(1, weight=1)
         
         combo_width = self.scale_size(30)
@@ -161,35 +241,44 @@ class VoiceCorrector:
         refresh_btn = ttk.Button(reference_frame, text="更新", command=self.update_reference_files)
         refresh_btn.grid(row=0, column=1, sticky=tk.W)
         
-        ttk.Label(main_frame, text="参考用ボックス:").grid(row=6, column=0, sticky=tk.W, pady=(0, self.scale_size(5)))
         reference_height = self.scale_size(4)
-        self.reference_text = scrolledtext.ScrolledText(main_frame, height=reference_height, width=input_width)
-        self.reference_text.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, self.scale_size(10)))
+        self.reference_text = scrolledtext.ScrolledText(self.reference_content_frame, height=reference_height, width=input_width)
+        self.reference_text.grid(row=1, column=0, sticky="ew")
         
         # 右クリックメニューを設定
         self.setup_text_context_menu(self.reference_text)
         
-        # ボタンフレーム
+        # ボタンフレーム（新レイアウト）
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=8, column=0, columnspan=2, pady=self.scale_size(10))
+        button_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=self.scale_size(10))
+        button_frame.columnconfigure(0, weight=1)
+        button_frame.columnconfigure(1, weight=1)
         
-        # 変換ボタン
+        # 変換ボタン（横幅いっぱい、縦の長さ2倍）
+        button_height = self.scale_size(60)  # 通常の2倍の高さ
         self.convert_btn = ttk.Button(button_frame, text="変換", command=self.convert_text)
-        self.convert_btn.pack(side=tk.LEFT, padx=(0, self.scale_size(10)))
+        self.convert_btn.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, self.scale_size(5)))
+        self.convert_btn.configure(padding=(0, button_height//4))  # 縦方向のパディングで高さを調整
         
-        # コピーボタン
-        self.copy_btn = ttk.Button(button_frame, text="コピー", command=self.copy_output)
-        self.copy_btn.pack(side=tk.LEFT, padx=(0, self.scale_size(10)))
+        # 下段フレーム（コピー・クリアボタン用）
+        bottom_button_frame = ttk.Frame(button_frame)
+        bottom_button_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
+        bottom_button_frame.columnconfigure(0, weight=1)
+        bottom_button_frame.columnconfigure(1, weight=1)
         
-        # クリアボタン
-        self.clear_btn = ttk.Button(button_frame, text="クリア", command=self.clear_text)
-        self.clear_btn.pack(side=tk.LEFT)
+        # コピーボタン（左半分）
+        self.copy_btn = ttk.Button(bottom_button_frame, text="コピー", command=self.copy_output)
+        self.copy_btn.grid(row=0, column=0, sticky="ew", padx=(0, self.scale_size(2)))
+        
+        # クリアボタン（右半分）
+        self.clear_btn = ttk.Button(bottom_button_frame, text="クリア", command=self.clear_text)
+        self.clear_btn.grid(row=0, column=1, sticky="ew", padx=(self.scale_size(2), 0))
         
         # 出力ボックス
-        ttk.Label(main_frame, text="出力ボックス:").grid(row=9, column=0, sticky=tk.W, pady=(self.scale_size(10), self.scale_size(5)))
+        ttk.Label(main_frame, text="出力ボックス:").grid(row=5, column=0, sticky=tk.W, pady=(self.scale_size(10), self.scale_size(5)))
         output_height = self.scale_size(6)
         self.output_text = scrolledtext.ScrolledText(main_frame, height=output_height, width=input_width)
-        self.output_text.grid(row=10, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, self.scale_size(10)))
+        self.output_text.grid(row=6, column=0, columnspan=2, sticky="nsew", pady=(0, self.scale_size(10)))
         
         # 右クリックメニューを設定
         self.setup_text_context_menu(self.output_text)
@@ -198,12 +287,26 @@ class VoiceCorrector:
         self.status_var = tk.StringVar()
         self.status_var.set("準備完了")
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.grid(row=11, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(self.scale_size(10), 0))
+        status_bar.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(self.scale_size(10), 0))
         
-        # 行の重みを設定（テキストボックスが拡張できるように）
-        main_frame.rowconfigure(1, weight=1)
-        main_frame.rowconfigure(7, weight=1)
-        main_frame.rowconfigure(10, weight=1)
+        # 行と列の重みを設定（レスポンシブデザイン）
+        # 入力ボックスと出力ボックスを等しい重みで拡張
+        main_frame.rowconfigure(1, weight=2)  # 入力ボックス（より大きな重み）
+        main_frame.rowconfigure(6, weight=2)  # 出力ボックス（より大きな重み）
+        
+        # 折りたたみ可能なセクションには最小の重み
+        main_frame.rowconfigure(2, weight=0)  # 方針セクション
+        main_frame.rowconfigure(3, weight=0)  # 参考セクション
+        main_frame.rowconfigure(4, weight=0)  # ボタンセクション
+        main_frame.rowconfigure(5, weight=0)  # 出力ラベル
+        main_frame.rowconfigure(7, weight=0)  # ステータスバー
+        
+        # カラムも拡張可能に
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+        
+        # 折りたたみ状態を復元
+        self.apply_section_visibility()
         
     def on_input_key_release(self, event):
         """入力ボックスのキーリリースイベント処理"""
@@ -230,17 +333,59 @@ class VoiceCorrector:
             # 変換を開始
             self.convert_text()
     
+    def toggle_policy_section(self):
+        """変換の方針セクションの表示/非表示を切り替え"""
+        is_visible = self.settings.get("show_policy_section", True)
+        self.settings["show_policy_section"] = not is_visible
+        self.apply_section_visibility()
+        
+    def toggle_reference_section(self):
+        """参考用セクションの表示/非表示を切り替え"""
+        is_visible = self.settings.get("show_reference_section", True)
+        self.settings["show_reference_section"] = not is_visible
+        self.apply_section_visibility()
+        
+    def apply_section_visibility(self):
+        """セクションの表示状態を適用"""
+        # 変換の方針セクション
+        show_policy = self.settings.get("show_policy_section", True)
+        if show_policy:
+            self.policy_content_frame.grid()
+            self.policy_toggle_btn.config(text="▼ 変換の方針")
+        else:
+            self.policy_content_frame.grid_remove()
+            self.policy_toggle_btn.config(text="▶ 変換の方針")
+            
+        # 参考用セクション
+        show_reference = self.settings.get("show_reference_section", True)
+        if show_reference:
+            self.reference_content_frame.grid()
+            self.reference_toggle_btn.config(text="▼ 参考用ファイル")
+        else:
+            self.reference_content_frame.grid_remove()
+            self.reference_toggle_btn.config(text="▶ 参考用ファイル")
+    
     def setup_text_context_menu(self, text_widget):
         """テキストウィジェットに右クリックメニューを設定"""
         context_menu = tk.Menu(text_widget, tearoff=0)
         
-        # メニュー項目を追加
+        # 入力ボックスの場合は変換開始メニューを追加
+        if hasattr(self, 'input_text') and text_widget == self.input_text:
+            context_menu.add_command(label="変換開始", command=self.convert_text)
+            context_menu.add_separator()
+
+        # 出力ボックスの場合は出力専用メニューを追加
+        if hasattr(self, 'output_text') and text_widget == self.output_text:
+            context_menu.add_command(label="出力をクリップボードにコピー", command=self.copy_output)
+            context_menu.add_separator()
+            
+        # 基本的なメニュー項目を追加
         context_menu.add_command(label="切り取り", command=lambda: self.text_cut(text_widget))
         context_menu.add_command(label="コピー", command=lambda: self.text_copy(text_widget))
         context_menu.add_command(label="貼り付け", command=lambda: self.text_paste(text_widget))
         context_menu.add_separator()
         context_menu.add_command(label="全て選択", command=lambda: self.text_select_all(text_widget))
-        
+                
         # 右クリックイベントをバインド
         def show_context_menu(event):
             try:
@@ -249,6 +394,13 @@ class VoiceCorrector:
                 context_menu.grab_release()
         
         text_widget.bind("<Button-3>", show_context_menu)  # 右クリック
+        
+        # ミドルボタンクリック（Button-2）でのペーストを無効化
+        def disable_middle_click(event):
+            return "break"  # イベントの伝播を停止
+        
+        text_widget.bind("<Button-2>", disable_middle_click)  # ミドルボタンクリック
+        text_widget.bind("<ButtonRelease-2>", disable_middle_click)  # ミドルボタンリリース
         
     def text_cut(self, text_widget):
         """テキストを切り取り"""
@@ -394,23 +546,12 @@ class VoiceCorrector:
         if not api_key:
             raise ValueError("OPENROUTER_API_KEY環境変数が設定されていません")
             
-        # プロンプトデータを作成
+        # プロンプトデータを直接取得
         conversion_policy = self.policy_text.get(1.0, tk.END).strip()
         reference_text = self.reference_text.get(1.0, tk.END).strip()
         
-        prompt_data = {
-            "input_text": input_text,
-            "conversion_policy": conversion_policy,
-            "reference_text": reference_text
-        }
-        
-        # デバッグ用：prompt_dataをコンソールに出力
-        print("=== デバッグ：prompt_data ===")
-        print(json.dumps(prompt_data, ensure_ascii=False, indent=2))
-        print("===========================")
-        
-        # システムプロンプト
-        system_prompt = """あなたは、音声入力されたテキストを修正・校正する専門家です。
+        # システムプロンプト（基本部分）
+        base_system_prompt = """あなたは、音声入力されたテキストを修正・校正する専門家です。
 あなたのタスクは、与えられた入力テキストを、文法的かつ文脈的に自然で正しい日本語の文章に変換することです。
 入力されている情報には誤認識や余計な記号などが含まれる可能性があります。
 
@@ -422,9 +563,7 @@ class VoiceCorrector:
 
 ```json
 {
-  "input_text": "ここに音声入力された文字列が入ります。",
-  "conversion_policy": "ここには変換の方針が入ります。",
-  "reference_text": "ここに文のスタイルの参考となる文章が入ります。この内容を直接的に出力に反映してはいけません。"
+  "input_text": "ここに音声入力された文字列が入ります。"
 }
 ```
 
@@ -433,10 +572,8 @@ class VoiceCorrector:
 ### **実行指示**
 
 1.  **テキストの解析**: まず、`input_text` を読み込み、誤字、脱字、文法的な誤り、不自然な言い回しを特定します。
-2.  **方針の適用**:
-      * `conversion_policy` に指示がある場合は、その方針に厳密に従ってテキストを修正します。（例：「地名は漢字にする」「プロダクト名は英字にする」など）
-      * `conversion_policy` が空欄の場合は、文脈に沿った日本語として最も自然な文章になるように修正してください。
-3.  **文体の参照**: `reference_text` が提供されている場合は、その文章のスタイル、トーン、語彙、句読点の使い方を参考にして、出力する文章の自然さを高めてください。
+2.  **方針の適用**: 変換方針に従ってテキストを修正します。
+3.  **文体の参照**: 参考文章のスタイル、トーン、語彙、句読点の使い方を参考にして、出力する文章の自然さを高めてください。
 4.  **修正の実行**: 上記の解析、方針、参照に基づき、`input_text` の元の意図を絶対に損なわないように注意しながら、句読点、助詞、接続詞などを適切に補い、自然で流暢な文章を作成します。
 5.  **出力の生成**: 修正が完了した文章を、以下の出力テンプレートの `corrected_text` の値として生成します。
 
@@ -456,6 +593,50 @@ class VoiceCorrector:
   * `corrected_text` の値以外に、いかなる説明、前置き、後書きも追加してはいけません。
   * 文体や文のトーンを厳守してください。特に参考用のテキストに含まれるトーンは重視してください。
 """
+
+        # 変換方針をシステムプロンプトに追加
+        if conversion_policy:
+            base_system_prompt += f"""
+
+-----
+
+### **変換方針**
+以下の方針に厳密に従ってテキストを修正してください。方針が空欄の場合は、文脈に沿った日本語として最も自然な文章になるように修正してください。
+
+<conversion_policy>
+{conversion_policy}
+</conversion_policy>
+
+"""
+
+        # 参考文章をシステムプロンプトに追加
+        if reference_text:
+            base_system_prompt += f"""
+
+-----
+
+### **参考文章（文体・スタイルの参考）**
+以下の文章のスタイル、トーン、語彙、句読点の使い方を参考にしてください。ただし、この内容を直接的に出力に反映してはいけません。
+
+<reference_text>
+{reference_text}
+</reference_text>
+
+"""
+        
+        # 最終的なシステムプロンプト
+        system_prompt = base_system_prompt
+        
+        # ユーザーメッセージには入力テキストのみを含める
+        user_message = json.dumps({"input_text": input_text}, ensure_ascii=False)
+        
+        # デバッグ用：送信直前のプロンプトを表示
+        print("=== デバッグ：送信データ ===")
+        print("【システムプロンプト】")
+        print(system_prompt)
+        print("\n【ユーザーメッセージ】")
+        print(user_message)
+        print("=========================")
         
         # APIリクエストを作成
         headers = {
@@ -469,7 +650,7 @@ class VoiceCorrector:
             "model": "openai/gpt-5",
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps(prompt_data, ensure_ascii=False)}
+                {"role": "user", "content": user_message}
             ],
             "temperature": 0.5
         }
@@ -483,17 +664,36 @@ class VoiceCorrector:
         )
         
         if response.status_code != 200:
+            # エラーレスポンスもデバッグ出力
+            print("=== デバッグ：APIエラーレスポンス ===")
+            print(f"ステータスコード: {response.status_code}")
+            print(f"レスポンステキスト: {response.text}")
+            print("===============================")
             raise Exception(f"API呼び出しに失敗しました: {response.status_code}")
             
         try:
             result = response.json()
+            
+            # 成功レスポンス全体をデバッグ出力
+            print("=== デバッグ：APIレスポンス全体 ===")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print("==============================")
+            
         except json.JSONDecodeError:
+            print("=== デバッグ：JSONパースエラー ===")
+            print(f"レスポンステキスト: {response.text}")
+            print("=============================")
             raise Exception("APIからの応答が無効なJSON形式です")
         
         if 'choices' not in result or not result['choices']:
             raise Exception("APIからの応答にchoicesが含まれていません")
             
         content = result['choices'][0]['message']['content']
+        
+        # レスポンスの中身（content部分）も詳細出力
+        print("=== デバッグ：レスポンス内容詳細 ===")
+        print(f"content: {content}")
+        print("===============================")
         
         # JSON応答をパース（マークダウンやコードブロック内のJSONも対応）
         corrected_text = self.extract_json_response(content)
@@ -595,6 +795,30 @@ class VoiceCorrector:
             self.settings["conversion_policy"] = self.policy_text.get(1.0, tk.END).strip()
             self.settings["reference_text"] = self.reference_text.get(1.0, tk.END).strip()
             self.settings["selected_reference_file"] = self.reference_selector.get()
+            
+            # ウィンドウのサイズとポジションを保存（DPIスケールを元に戻す）
+            geometry = self.root.geometry()
+            # geometry形式: "幅x高さ+x座標+y座標" (例: "800x600+100+50")
+            if 'x' in geometry:
+                size_part, position_part = geometry.split('+', 1)
+                width, height = map(int, size_part.split('x'))
+                
+                # DPIスケールを元に戻して保存
+                self.settings["window_width"] = int(width / self.scale_factor)
+                self.settings["window_height"] = int(height / self.scale_factor)
+                
+                # ポジション情報があれば保存
+                if '+' in position_part:
+                    x_pos, y_pos = position_part.split('+')
+                    self.settings["window_x"] = int(int(x_pos) / self.scale_factor)
+                    self.settings["window_y"] = int(int(y_pos) / self.scale_factor)
+                elif position_part:
+                    # "x+y" の形式の場合
+                    if '+' in position_part or '-' in position_part[1:]:
+                        coords = position_part.replace('-', '+-').split('+')
+                        if len(coords) >= 2:
+                            self.settings["window_x"] = int(int(coords[0]) / self.scale_factor)
+                            self.settings["window_y"] = int(int(coords[1]) / self.scale_factor)
             
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(self.settings, f, ensure_ascii=False, indent=2)
