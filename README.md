@@ -67,7 +67,7 @@ python main.py
 
 ## APIについて
 
-このアプリケーションはOpenRouter APIの`openai/gpt-oss-20b`モデルを使用してテキストの修正を行います。APIキーの取得方法：
+このアプリケーションはOpenRouter APIの言語モデルを使用してテキストの修正を行います。APIキーの取得方法：
 
 1. [OpenRouter](https://openrouter.ai/)にアクセス
 2. アカウントを作成
@@ -81,9 +81,6 @@ python main.py
 
 ### ライブラリエラー
 - `pip install -r requirements.txt`でライブラリが正しくインストールされているか確認してください
-
-### 音声通知が動作しない
-- Windowsの音声設定を確認してください
 
 ## ライセンス
 
